@@ -1,0 +1,7 @@
+{
+  "extends": "next/core-web-vitals",
+  "rules": {
+    "react/no-unknown-property": ["error", { "ignore": ["jsx", "global"] }],
+    "@next/next/no-img-element": "off"
+  }
+}
