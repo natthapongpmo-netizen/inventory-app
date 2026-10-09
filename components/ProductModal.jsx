@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { addProduct, updateProduct, getSalesChannels } from "../lib/supabase";
+import { parsePrice, formatPrice } from "../lib/price";
+
+const PRICE_FIELDS = ["costPrice", "sellingPrice"];
+const noPriceErrors = { costPrice: "", sellingPrice: "" };
 
 const emptyForm = {
   costPrice: "",
@@ -20,6 +24,7 @@ const ProductModal = ({ isOpen, onClose, onSaved, editingProduct }) => {
   const [imagePreview, setImagePreview] = useState(null);
   const [imageFile, setImageFile] = useState(null);
   const [error, setError] = useState("");
+  const [priceErrors, setPriceErrors] = useState(noPriceErrors);
 
   const isEditing = Boolean(editingProduct);
 
@@ -32,9 +37,9 @@ const ProductModal = ({ isOpen, onClose, onSaved, editingProduct }) => {
     if (!isOpen) return;
     if (editingProduct) {
       setFormData({
-        costPrice: editingProduct.cost_price ?? "",
+        costPrice: formatPrice(editingProduct.cost_price),
         salesChannelId: editingProduct.sales_channel_id ?? "",
-        sellingPrice: editingProduct.selling_price ?? "",
+        sellingPrice: formatPrice(editingProduct.selling_price),
         notes: editingProduct.notes ?? "",
         saleDate: editingProduct.sale_date ?? "",
       });
@@ -45,6 +50,7 @@ const ProductModal = ({ isOpen, onClose, onSaved, editingProduct }) => {
     }
     setImageFile(null);
     setError("");
+    setPriceErrors(noPriceErrors);
   }, [isOpen, editingProduct]);
 
   useEffect(() => {
@@ -70,6 +76,15 @@ const ProductModal = ({ isOpen, onClose, onSaved, editingProduct }) => {
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+    if (PRICE_FIELDS.includes(name)) setPriceErrors((prev) => ({ ...prev, [name]: "" }));
+  };
+
+  // ออกจากช่องราคา: ตรวจค่า ถ้าถูกต้องจัดรูปแบบให้อ่านง่าย (1250 -> 1,250) ถ้าผิดแสดงคำเตือนใต้ช่อง
+  const handlePriceBlur = (e) => {
+    const { name, value } = e.target;
+    const { value: num, error: msg } = parsePrice(value);
+    setPriceErrors((prev) => ({ ...prev, [name]: msg }));
+    if (!msg) setFormData((prev) => ({ ...prev, [name]: formatPrice(num) }));
   };
 
   const handleSubmit = async (e) => {
@@ -85,14 +100,22 @@ const ProductModal = ({ isOpen, onClose, onSaved, editingProduct }) => {
       return;
     }
 
+    const cost = parsePrice(formData.costPrice);
+    const sell = parsePrice(formData.sellingPrice);
+    if (cost.error || sell.error) {
+      setPriceErrors({ costPrice: cost.error, sellingPrice: sell.error });
+      setError("ตรวจช่องราคาที่มีข้อความสีแดงก่อนบันทึก");
+      return;
+    }
+
     setLoading(true);
     try {
       const payload = {
         image: imageFile,
         existingImageUrl: editingProduct?.image_url ?? null,
-        costPrice: formData.costPrice,
+        costPrice: cost.value ?? "",
         salesChannelId: formData.salesChannelId,
-        sellingPrice: formData.sellingPrice,
+        sellingPrice: sell.value ?? "",
         notes: formData.notes,
         saleDate: formData.saleDate,
       };
@@ -172,11 +195,37 @@ const ProductModal = ({ isOpen, onClose, onSaved, editingProduct }) => {
           <div className="two">
             <div className="group">
               <label htmlFor="costPrice">ราคาต้นทุน</label>
-              <input id="costPrice" type="number" inputMode="decimal" name="costPrice" value={formData.costPrice} onChange={handleInputChange} placeholder="0.00" step="0.01" min="0" />
+              <input
+                id="costPrice"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                name="costPrice"
+                value={formData.costPrice}
+                onChange={handleInputChange}
+                onBlur={handlePriceBlur}
+                placeholder="0.00"
+                aria-invalid={priceErrors.costPrice ? "true" : "false"}
+                aria-describedby={priceErrors.costPrice ? "costPrice-error" : undefined}
+              />
+              {priceErrors.costPrice && <p id="costPrice-error" className="field-error">{priceErrors.costPrice}</p>}
             </div>
             <div className="group">
               <label htmlFor="sellingPrice">ราคาขาย</label>
-              <input id="sellingPrice" type="number" inputMode="decimal" name="sellingPrice" value={formData.sellingPrice} onChange={handleInputChange} placeholder="0.00" step="0.01" min="0" />
+              <input
+                id="sellingPrice"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                name="sellingPrice"
+                value={formData.sellingPrice}
+                onChange={handleInputChange}
+                onBlur={handlePriceBlur}
+                placeholder="0.00"
+                aria-invalid={priceErrors.sellingPrice ? "true" : "false"}
+                aria-describedby={priceErrors.sellingPrice ? "sellingPrice-error" : undefined}
+              />
+              {priceErrors.sellingPrice && <p id="sellingPrice-error" className="field-error">{priceErrors.sellingPrice}</p>}
             </div>
           </div>
 
@@ -192,7 +241,8 @@ const ProductModal = ({ isOpen, onClose, onSaved, editingProduct }) => {
 
           <div className="buttons">
             <button type="button" className="btn-secondary" onClick={onClose} disabled={loading}>ยกเลิก</button>
-            <button type="submit" className="btn-primary" disabled={loading}>
+            {/* onMouseDown: กันไม่ให้ช่องราคาเสียโฟกัสก่อนคลิก ไม่อย่างนั้นคำเตือนที่โผล่ใต้ช่องจะดันปุ่มเลื่อนจนคลิกหลุด */}
+            <button type="submit" className="btn-primary" disabled={loading} onMouseDown={(e) => e.preventDefault()}>
               {loading ? "กำลังบันทึก..." : isEditing ? "บันทึกการแก้ไข" : "บันทึก"}
             </button>
           </div>
@@ -222,7 +272,10 @@ const ProductModal = ({ isOpen, onClose, onSaved, editingProduct }) => {
         }
         .group input:focus, .group select:focus, .group textarea:focus { outline: none; border-color: var(--brand-text); box-shadow: 0 0 0 3px var(--brand-tint); }
         .group textarea { resize: vertical; min-height: 68px; }
-        .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .group input[aria-invalid="true"] { border-color: var(--cost); }
+        .group input[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px var(--cost-tint); }
+        .field-error { color: var(--cost); font-size: 12.5px; margin-top: 5px; line-height: 1.45; }
+        .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
         .drop {
           display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer;
           border: 1.5px dashed var(--line); border-radius: 12px; padding: 24px 16px; color: var(--ink-soft);
